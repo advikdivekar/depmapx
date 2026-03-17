@@ -1,0 +1,18 @@
+name: 'depmapx'
+description: 'AST-driven dependency analyzer to detect and prune dead packages.'
+author: 'Advik'
+inputs:
+  target_dir:
+    description: 'The directory to scan'
+    required: false
+    default: '.'
+runs:
+  using: 'composite'
+  steps:
+    - name: Run depmapx
+      shell: bash
+      run: npx depmapx analyze
+branding:
+  icon: 'package'
+  color: 'blue'
+  
