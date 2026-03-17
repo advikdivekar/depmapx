@@ -1,0 +1,15 @@
+{
+    "name": "depmapx",
+    "version": "1.0.0",
+    "private": true,
+    "description": "An AST-driven dependency analyzer and CI/CD gatekeeper.",
+    "workspaces": [
+        "packages/*"
+    ],
+    "scripts": {
+        "cli": "npm run start --workspace=packages/cli",
+        "web": "npm run dev --workspace=packages/web"
+    },
+    "author": "Advik",
+    "license": "MIT"
+}
