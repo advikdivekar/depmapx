@@ -247,6 +247,6 @@ Full license text: [https://creativecommons.org/licenses/by-nc-nd/4.0/](https://
 
 <div align="center">
 
-Authored by <a href="https://github.com/advik">Advik</a>
+Authored by <a href="https://github.com/advikdivekar">Advik</a>
 
 </div>
