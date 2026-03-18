@@ -2,14 +2,14 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { scanProject } from './scanner.js';
+import { scanProject, generateArchitectureMap } from './scanner.js';
 
 const program = new Command();
 
 program
     .name('depmapx')
     .description('AST-driven dependency analyzer to detect unused packages.')
-    .version('1.0.0');
+    .version('1.1.0');
 
 program
     .command('analyze')
@@ -40,6 +40,28 @@ program
             }
         } catch (error) {
             spinner.fail(chalk.red('Analysis failed'));
+            console.error(chalk.red(error.message));
+            process.exit(1);
+        }
+    });
+
+program
+    .command('map')
+    .description('Generate a visual ARCHITECTURE.md map of your dependencies')
+    .action(async () => {
+        const targetDir = process.cwd();
+        const spinner = ora(`Mapping architecture for ${targetDir}...`).start();
+
+        try {
+            const results = await scanProject(targetDir);
+            const outputPath = await generateArchitectureMap(targetDir, results);
+
+            spinner.succeed(chalk.green('Architecture map generated successfully.\n'));
+            console.log(chalk.bold.blue('File saved to: ') + chalk.underline(outputPath));
+            console.log(chalk.gray('Commit this file to GitHub to see the interactive visualization.'));
+
+        } catch (error) {
+            spinner.fail(chalk.red('Failed to generate map.'));
             console.error(chalk.red(error.message));
             process.exit(1);
         }
