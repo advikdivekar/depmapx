@@ -3,7 +3,7 @@
 <h1>depmapx</h1>
 
 <p><strong>AST-driven dependency analyzer and CI/CD gatekeeper.</strong><br/>
-Detect unused packages, prune dead code, and map your true project architecture.</p>
+Detect unused packages, calculate blast radius, prune dead code, and map your true project architecture.</p>
 
 [![npm version](https://img.shields.io/npm/v/depmapx?color=blue&style=flat-square)](https://www.npmjs.com/package/depmapx)
 [![License: CC BY-NC-ND 4.0](https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-red.svg?style=flat-square)](https://creativecommons.org/licenses/by-nc-nd/4.0/)
@@ -26,7 +26,7 @@ Unlike checkers that rely on regular expression heuristics, `depmapx` understand
 - TypeScript and JSX syntax
 - Scoped packages (`@scope/package`) and subpath imports
 
-The result is a precise, verifiable picture of your project's true runtime dependencies.
+The result is a precise, verifiable picture of your project's true runtime dependencies — and exactly how much of your codebase depends on each one.
 
 ---
 
@@ -35,6 +35,7 @@ The result is a precise, verifiable picture of your project's true runtime depen
 | Feature | Description |
 |---|---|
 | **Dead Dependency Detection** | Identifies packages declared in `package.json` but never imported anywhere in the codebase |
+| **Blast Radius Calculation** | Traces the full cascading impact of removing a package — direct importers and every file that transitively depends on them |
 | **Architecture Mapping** | Generates a Mermaid.js dependency graph grouped by source directory |
 | **CI/CD Gatekeeper** | Exits with a non-zero code when unused packages are detected, enabling pipeline enforcement |
 | **Zero Configuration** | No setup files or configuration required — works immediately in any Node.js project |
@@ -84,6 +85,86 @@ Recommendation: Run npm uninstall <package> to remove these dependencies.
 ```
 
 The command exits with code `1` when unused dependencies are found, and code `0` when the project is clean. This makes it suitable for use as a hard gate in CI/CD pipelines.
+
+---
+
+### `impact` — Blast Radius Calculation
+
+Calculates the full cascading impact of removing one or more packages from your codebase. `depmapx` does not stop at direct importers — it performs a reverse traversal of the internal file dependency graph to surface every file that would transitively break, giving you the complete blast radius before you make a destructive change.
+
+Accepts one or more package names in a single invocation.
+
+```bash
+depmapx impact <package>
+depmapx impact <package1> <package2> ...
+```
+
+**Example:**
+
+```bash
+npx depmapx impact react react-dom zustand
+```
+
+**Example output:**
+
+```
+Analysis complete for react
+
+Blast Radius Summary:
+● Total Affected Files: 38
+└── 35 Direct Importers
+└── 3 Indirect/Secondary Importers
+
+Affected Files:
+  - src/hooks/useAIChat.ts (Direct)
+  - src/hooks/useApiData.ts (Direct)
+  - src/hooks/useCountUp.ts (Direct)
+  - src/hooks/useDAOData.ts (Direct)
+  - src/hooks/useRealtimeEvents.ts (Direct)
+  - src/hooks/useStreamingAI.ts (Direct)
+  - src/app/page.tsx (Direct)
+  - src/app/providers.tsx (Direct)
+  - src/components/ai/AIHologram.tsx (Direct)
+  - src/components/ai/CommandBar.tsx (Direct)
+  - src/components/canvas/UniverseScene.tsx (Direct)
+  - src/components/wallet/WalletConnect.tsx (Direct)
+  - src/components/ui/Button.tsx (Direct)
+  - src/components/ui/Drawer.tsx (Direct)
+  - src/components/ui/Modal.tsx (Direct)
+  - src/app/layout.tsx (Indirect)
+  - src/components/canvas/UniverseCanvas.tsx (Indirect)
+  - src/components/marketing/MarketingLayoutWrapper.tsx (Indirect)
+  ...
+
+ VERDICT  Deleting react will break 38 files.
+
+──────────────────────────────────────────────────
+
+i  No impact detected for react-dom. It may be unused.
+
+──────────────────────────────────────────────────
+
+Analysis complete for zustand
+
+Blast Radius Summary:
+● Total Affected Files: 4
+└── 4 Direct Importers
+└── 0 Indirect/Secondary Importers
+
+Affected Files:
+  - src/store/agentStore.ts (Direct)
+  - src/store/daoStore.ts (Direct)
+  - src/store/eventStore.ts (Direct)
+  - src/store/uiStore.ts (Direct)
+
+ VERDICT  Deleting zustand will break 4 files.
+
+──────────────────────────────────────────────────
+```
+
+The blast radius distinguishes between two levels of impact. **Direct importers** are files that explicitly import the target package. **Indirect importers** are files that import those files — they carry no reference to the package themselves but their runtime behavior depends on modules that do. Both levels will break if the package is removed.
+
+If a package is declared in `package.json` but has no detected import activity, `depmapx` reports it as potentially unused rather than silently returning an empty result.
 
 ---
 
@@ -153,24 +234,30 @@ Source Files (.js / .ts / .jsx / .tsx)
       Import Node Extractor
       (static + dynamic)
               |
-              v
-   Resolve base package names
-   (handle scoped + subpaths)
-              |
-              v
-   Cross-reference with package.json
-              |
-              v
-   Unused Dependency Report
-   + Architecture Map (optional)
+              +---------------------------+
+              |                           |
+              v                           v
+   Resolve NPM package names      Map internal file-to-file
+   (scoped + subpaths)            imports (local dependency graph)
+              |                           |
+              v                           v
+   Cross-reference with          Reverse AST Traversal
+     package.json                (blast radius tracing)
+              |                           |
+              +---------------------------+
+                            |
+                            v
+              Unused Dependency Report
+              Blast Radius Report
+              Architecture Map (optional)
 ```
 
 1. `depmapx` reads `package.json` from the target directory and collects all declared dependencies.
-2. `fast-glob` discovers every `.js`, `.ts`, `.jsx`, and `.tsx` file, excluding `node_modules`, `dist`, and `build`.
+2. `fast-glob` discovers every `.js`, `.ts`, `.jsx`, and `.tsx` file, excluding `node_modules`, `dist`, `build`, and `.next`.
 3. Each file is parsed by `@babel/parser` into an AST with TypeScript, JSX, and dynamic import support enabled.
-4. `@babel/traverse` walks each AST and extracts import sources from `ImportDeclaration`, `CallExpression` (require), and dynamic `import()` nodes.
-5. Raw import strings are resolved to their base package name, accounting for scoped packages and subpath imports.
-6. The resolved set of used packages is compared against the declared dependency list to produce the final report.
+4. `@babel/traverse` walks each AST and extracts two categories of imports: external NPM package references and internal relative file imports. Both are recorded separately.
+5. External imports are resolved to their base package name, accounting for scoped packages and subpath imports, then cross-referenced with declared dependencies to identify unused packages.
+6. Internal imports are used to construct a local file dependency graph. When `impact` is invoked, this graph is traversed in reverse — starting from files that directly import the target package, then recursively identifying every file that imports those files — to produce the complete blast radius.
 
 ---
 
@@ -188,6 +275,7 @@ The following directories are excluded from file discovery automatically:
 - `node_modules/`
 - `dist/`
 - `build/`
+- `.next/`
 
 No configuration file is required to control this behavior.
 
@@ -208,6 +296,9 @@ No. `depmapx` is a read-only analysis tool. It reports findings but does not mod
 npm uninstall <package-name>
 ```
 
+**How does blast radius differ from just searching for imports?**
+A plain import search only finds files that directly reference the package. The blast radius engine goes further — it maps every internal `import` between your own source files and traverses that graph in reverse. Files that have no direct knowledge of the package but depend on modules that do are also surfaced. In a layered codebase, this secondary impact is typically larger than the direct impact.
+
 **Why use this instead of `depcheck`?**
 `depcheck` relies on regular expression pattern matching, which can produce false positives and miss dynamic import patterns. `depmapx` operates on the AST — the same representation compilers use — making it structurally aware of every import form your code can express.
 
@@ -224,6 +315,26 @@ Bug reports, feature requests, and pull requests are welcome. To contribute:
 5. Open a pull request against `main`.
 
 Please open an issue before beginning work on significant changes so the approach can be discussed in advance.
+
+---
+
+## Changelog
+
+### v1.2.0
+- Added `impact` command with full blast radius calculation
+- Reverse AST traversal engine to trace indirect file-to-file dependencies
+- Multi-package support — analyze several packages in a single invocation
+- Internal local dependency graph now constructed during every scan
+- Graceful handling of unused packages within an `impact` run — reports instead of errors
+
+### v1.1.3
+- Added `map` command with Mermaid.js architecture output
+- Improved scoped package and subpath resolution
+- Excluded `.next/` directory from file discovery
+
+### v1.0.0
+- Initial release with `analyze` command
+- AST-based unused dependency detection via Babel
 
 ---
 
