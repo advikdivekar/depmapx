@@ -12,21 +12,25 @@ export async function scanProject(targetDir) {
     const pkgJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
     const dependencies = Object.keys(pkgJson.dependencies || {});
 
+    // Exclude build artifacts and node_modules from the scan
     const files = await fg(['**/*.{js,jsx,ts,tsx}'], {
         cwd: targetDir,
-        ignore: ['node_modules/**', 'dist/**', 'build/**']
+        ignore: ['node_modules/**', 'dist/**', 'build/**', '.next/**']
     });
 
     const usedDeps = new Set();
     const fileToDeps = {};
+    const fileToLocals = {};
 
     for (const file of files) {
         const filePath = path.join(targetDir, file);
-        const fileImports = parseFile(filePath);
+        const { packages, locals } = parseFile(filePath);
 
         fileToDeps[file] = [];
+        fileToLocals[file] = locals;
 
-        fileImports.forEach(imp => {
+        packages.forEach(imp => {
+            // Support scoped packages and subpaths
             const basePackage = imp.startsWith('@')
                 ? imp.split('/').slice(0, 2).join('/')
                 : imp.split('/')[0];
@@ -47,7 +51,8 @@ export async function scanProject(targetDir) {
         usedCount: dependencies.length - unusedDeps.length,
         unusedDeps,
         usedDeps: Array.from(usedDeps).filter(dep => dependencies.includes(dep)),
-        fileToDeps
+        fileToDeps,
+        fileToLocals
     };
 }
 
@@ -59,7 +64,6 @@ export async function generateArchitectureMap(targetDir, results) {
     let mermaidCode = 'graph LR\n';
     const safeId = (str, prefix) => prefix + str.replace(/[^a-zA-Z0-9]/g, '_');
 
-    // Group files by their parent folder to prevent visual clutter
     const folderToDeps = {};
     for (const [file, deps] of Object.entries(files)) {
         if (deps.length > 0) {
@@ -73,7 +77,6 @@ export async function generateArchitectureMap(targetDir, results) {
         }
     }
 
-    // 1. Draw connections from Folders to Dependencies
     for (const [folder, deps] of Object.entries(folderToDeps)) {
         const folderId = safeId(folder, 'dir_');
         deps.forEach(dep => {
@@ -82,13 +85,11 @@ export async function generateArchitectureMap(targetDir, results) {
         });
     }
 
-    // 2. Add Unused Dependencies
     unusedDeps.forEach(dep => {
         const depId = safeId(dep, 'pkg_');
         mermaidCode += `    ${depId}["${dep} (UNUSED)"]\n`;
     });
 
-    // 3. Apply Colors and Styles
     mermaidCode += '\n    %% Styling\n';
     mermaidCode += '    classDef unused fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b;\n';
     mermaidCode += '    classDef used fill:#d1fae5,stroke:#10b981,stroke-width:2px,color:#065f46;\n';

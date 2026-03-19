@@ -9,39 +9,46 @@ export function parseFile(filePath) {
     try {
         const code = fs.readFileSync(filePath, 'utf-8');
 
-        // Parse the code into an Abstract Syntax Tree
+        // The Brain: Parsing code into an Abstract Syntax Tree
         const ast = parse(code, {
             sourceType: 'module',
             plugins: ['jsx', 'typescript', 'dynamicImport', 'classProperties']
         });
 
-        const imports = [];
+        const packages = [];
+        const locals = [];
 
-        // Walk through the tree to find where packages are used
         traverse(ast, {
+            // Standard imports: import x from 'y'
             ImportDeclaration({ node }) {
                 if (node.source && node.source.value) {
-                    imports.push(node.source.value);
+                    const val = node.source.value;
+                    // Check if it's a local file (./ or ../) or an NPM package
+                    val.startsWith('.') ? locals.push(val) : packages.push(val);
                 }
             },
+            // Dynamic imports or require: require('y') or import('y')
             CallExpression({ node }) {
-                if (node.callee.name === 'require' && node.arguments.length > 0) {
+                const isRequire = node.callee.name === 'require';
+                const isDynamicImport = node.callee.type === 'Import';
+
+                if ((isRequire || isDynamicImport) && node.arguments.length > 0) {
                     if (node.arguments[0].type === 'StringLiteral') {
-                        imports.push(node.arguments[0].value);
-                    }
-                }
-                if (node.callee.type === 'Import' && node.arguments.length > 0) {
-                    if (node.arguments[0].type === 'StringLiteral') {
-                        imports.push(node.arguments[0].value);
+                        const val = node.arguments[0].value;
+                        val.startsWith('.') ? locals.push(val) : packages.push(val);
                     }
                 }
             }
         });
 
-        // We only care about NPM packages, not relative local files (like './components')
-        return imports.filter(imp => !imp.startsWith('.'));
+        // Return a structured object instead of a simple list
+        return {
+            packages: [...new Set(packages)],
+            locals: [...new Set(locals)]
+        };
 
     } catch (error) {
-        return [];
+        // If a file is broken, return empty arrays so the CLI doesn't crash
+        return { packages: [], locals: [] };
     }
 }
